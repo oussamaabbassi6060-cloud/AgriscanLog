@@ -1,36 +1,16 @@
 [build]
   # Build command for Next.js
-  command = "npm run build"
+  command = "npm install --legacy-peer-deps && npm run build"
+  publish = ".next"
   
-  # Node.js version to use during build
-  environment = { NODE_VERSION = "18" }
+[build.environment]
+  NODE_VERSION = "18.20.8"
+  NPM_VERSION = "10"
+  NEXT_TELEMETRY_DISABLED = "1"
 
-[build.processing]
-  # Skip processing for better performance
-  skip_processing = false
-
-[build.processing.css]
-  # Don't minify CSS (Next.js handles this)
-  bundle = false
-  minify = false
-
-[build.processing.js]
-  # Don't minify JS (Next.js handles this)
-  bundle = false
-  minify = false
-
-# Redirects for Next.js routing (SPA fallback)
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
-# Environment variables (you'll need to set these in Netlify dashboard)
-# NEXT_PUBLIC_SUPABASE_URL = "your-supabase-url"
-# NEXT_PUBLIC_SUPABASE_ANON_KEY = "your-supabase-anon-key"
-# GROQ_API_KEY = "your-groq-api-key"
-# CLERK_PUBLISHABLE_KEY = "your-clerk-publishable-key"
-# CLERK_SECRET_KEY = "your-clerk-secret-key"
+# Next.js plugin will handle routing automatically
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 # Headers for better security
 [[headers]]
