@@ -5,8 +5,11 @@
   
 [build.environment]
   NODE_VERSION = "18.20.8"
-  NPM_VERSION = "10"
+  NPM_VERSION = "10.8.2"
   NEXT_TELEMETRY_DISABLED = "1"
+  # Force npm usage
+  NPM_FLAGS = "--legacy-peer-deps"
+  NETLIFY_USE_PNPM = "false"
 
 # Next.js plugin will handle routing automatically
 [[plugins]]
