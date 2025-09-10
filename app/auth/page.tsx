@@ -9,7 +9,6 @@ import { AgriScanTesting } from "@/components/agriscan-testing"
 import { PaymentForm } from "@/components/payment-form"
 import { Dashboard } from "@/components/dashboard"
 import { SignedIn, SignOutButton, useUser } from "@clerk/nextjs"
-import { Logo } from "@/components/ui/logo"
 
 export type UserData = {
   username: string
@@ -43,7 +42,7 @@ export type AppState = {
   showDashboard: boolean
 }
 
-export default function AgriScanApp() {
+export default function AuthPage() {
   const { isSignedIn, isLoaded, user } = useUser()
 
   const [appState, setAppState] = useState<AppState>({
@@ -199,7 +198,12 @@ export default function AgriScanApp() {
       <header className="relative z-10 glass-strong border-b border-border/50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <Logo width={48} height={48} />
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-lg">
+                <span className="text-primary-foreground font-bold text-sm">AS</span>
+              </div>
+              <h1 className="text-2xl font-bold text-foreground drop-shadow-sm">AgriScan</h1>
+            </div>
             <div className="flex items-center gap-3">
               <SignedIn>
                 {appState.step === 4 && !appState.showDashboard && (

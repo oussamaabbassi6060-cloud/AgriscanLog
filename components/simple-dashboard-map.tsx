@@ -11,14 +11,14 @@ interface ScanData {
   status: "healthy" | "unhealthy"
   location: { lat: number; lng: number }
   timestamp: Date
-  confidence: number
+  health: number
   species?: {
     name: string
-    confidence: number
+    health: number
   }
   disease?: {
     name: string
-    confidence: number
+    health: number
     isHealthy: boolean
   }
 }
@@ -34,9 +34,12 @@ function InteractiveMap({ scans, center }: { scans: ScanData[]; center: [number,
   const [mapInstance, setMapInstance] = useState<any>(null)
   const [markers, setMarkers] = useState<any[]>([])
   const mapContainerRef = useRef<HTMLDivElement>(null)
+  const mapInitializedRef = useRef(false)
+  const cleanupRef = useRef<() => void>()
   
   useEffect(() => {
     if (typeof window === 'undefined') return
+    if (mapInitializedRef.current) return // Prevent double initialization
 
     const initMap = async () => {
       try {
@@ -51,14 +54,30 @@ function InteractiveMap({ scans, center }: { scans: ScanData[]; center: [number,
           shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
         })
 
-        // Wait for container to be available
+        // Wait for container to be available and check size
         if (!mapContainerRef.current) {
           console.warn('Map container not ready')
           return
         }
 
+        // Check if container has valid dimensions
+        const containerWidth = mapContainerRef.current.offsetWidth
+        const containerHeight = mapContainerRef.current.offsetHeight
+        
+        if (containerWidth === 0 || containerHeight === 0) {
+          console.warn('Map container has no dimensions, retrying...')
+          setTimeout(initMap, 200)
+          return
+        }
+
         // Clear any existing map
-        mapContainerRef.current.innerHTML = ''
+        if (mapContainerRef.current._leaflet_id) {
+          mapContainerRef.current.innerHTML = ''
+          mapContainerRef.current.removeAttribute('_leaflet_id')
+        }
+
+        // Mark as initialized
+        mapInitializedRef.current = true
 
         // Create map instance with safer options
         const map = L.default.map(mapContainerRef.current, {
@@ -73,7 +92,10 @@ function InteractiveMap({ scans, center }: { scans: ScanData[]; center: [number,
           keyboard: true,
           // Add these options to prevent DOM issues
           preferCanvas: false,
-          renderer: L.default.svg()
+          renderer: L.default.svg(),
+          // Add these to handle container issues
+          trackResize: true,
+          markerZoomAnimation: true
         })
 
         // Add tile layer
@@ -119,7 +141,7 @@ function InteractiveMap({ scans, center }: { scans: ScanData[]; center: [number,
                   ${isRecent ? '<span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px;">Recent</span>' : ''}
                 </div>
                 ${scan.species ? `<div style="margin-bottom: 4px;"><strong>Species:</strong> ${scan.species.name}</div>` : ''}
-                <div style="margin-bottom: 4px;"><strong>Confidence:</strong> ${scan.confidence}%</div>
+                <div style="margin-bottom: 4px;"><strong>Health:</strong> ${scan.health}%</div>
                 <div style="margin-bottom: 4px;"><strong>Date:</strong> ${scan.timestamp.toLocaleDateString()}</div>
                 <div style="font-size: 12px; color: #666;">
                   ${scan.location.lat.toFixed(4)}, ${scan.location.lng.toFixed(4)}
@@ -136,12 +158,47 @@ function InteractiveMap({ scans, center }: { scans: ScanData[]; center: [number,
           map.fitBounds(group.getBounds().pad(0.1))
         }
 
+        // Store cleanup function
+        cleanupRef.current = () => {
+          try {
+            markers.forEach(marker => {
+              try {
+                marker.remove()
+              } catch (e) {
+                console.warn('Error removing marker:', e)
+              }
+            })
+            map.remove()
+          } catch (error) {
+            console.warn('Error during map cleanup:', error)
+          }
+        }
+
         setMapInstance(map)
         setMarkers(newMarkers)
         setMapLoaded(true)
+
+        // Handle window resize
+        const handleResize = () => {
+          if (map && mapContainerRef.current) {
+            setTimeout(() => {
+              map.invalidateSize()
+            }, 100)
+          }
+        }
+        window.addEventListener('resize', handleResize)
+
+        // Store cleanup for resize listener
+        const originalCleanup = cleanupRef.current
+        cleanupRef.current = () => {
+          window.removeEventListener('resize', handleResize)
+          originalCleanup()
+        }
+
       } catch (error) {
         console.error('Error initializing map:', error)
         setMapLoaded(true) // Still show the container even if map fails
+        mapInitializedRef.current = false // Allow retry
       }
     }
 
@@ -151,17 +208,94 @@ function InteractiveMap({ scans, center }: { scans: ScanData[]; center: [number,
     // Cleanup function
     return () => {
       clearTimeout(timeoutId)
-      if (mapInstance) {
-        try {
-          mapInstance.remove()
-        } catch (error) {
-          console.warn('Error removing map:', error)
+      if (cleanupRef.current) {
+        cleanupRef.current()
+      }
+      mapInitializedRef.current = false
+      setMapInstance(null)
+      setMarkers([])
+    }
+  }, []) // Remove dependencies to prevent re-initialization
+
+  // Update map when scans change
+  useEffect(() => {
+    if (!mapInstance || !mapInitializedRef.current) return
+
+    const updateMarkers = async () => {
+      try {
+        const L = await import('leaflet')
+        
+        // Clear existing markers
+        markers.forEach(marker => {
+          try {
+            marker.remove()
+          } catch (e) {
+            console.warn('Error removing marker:', e)
+          }
+        })
+
+        // Create custom icons
+        const createCustomIcon = (isHealthy: boolean, isRecent: boolean) => {
+          const color = isHealthy ? '#22c55e' : '#ef4444'
+          const svg = `
+            <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="16" cy="16" r="12" fill="${color}" stroke="white" stroke-width="3"/>
+              <polygon points="16,8 20,16 16,24 12,16" fill="white"/>
+              ${isRecent ? '<circle cx="24" cy="8" r="4" fill="#f59e0b" stroke="white" stroke-width="2"/>' : ''}
+            </svg>
+          `
+          
+          return L.default.divIcon({
+            html: svg,
+            className: 'custom-div-icon',
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+            popupAnchor: [0, -16]
+          })
         }
-        setMapInstance(null)
-        setMarkers([])
+
+        // Add new markers
+        const newMarkers: any[] = []
+        scans.forEach((scan) => {
+          const isHealthy = scan.status === "healthy"
+          const isRecent = new Date().getTime() - scan.timestamp.getTime() < 7 * 24 * 60 * 60 * 1000
+
+          const icon = createCustomIcon(isHealthy, isRecent)
+          const marker = L.default.marker([scan.location.lat, scan.location.lng], { icon })
+            .addTo(mapInstance)
+            .bindPopup(`
+              <div style="min-width: 200px; padding: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                  <div style="width: 12px; height: 12px; border-radius: 50%; background: ${isHealthy ? '#22c55e' : '#ef4444'}"></div>
+                  <strong>${isHealthy ? 'Healthy' : 'Unhealthy'} Plant</strong>
+                  ${isRecent ? '<span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px;">Recent</span>' : ''}
+                </div>
+                ${scan.species ? `<div style="margin-bottom: 4px;"><strong>Species:</strong> ${scan.species.name}</div>` : ''}
+                <div style="margin-bottom: 4px;"><strong>Health:</strong> ${scan.health}%</div>
+                <div style="margin-bottom: 4px;"><strong>Date:</strong> ${scan.timestamp.toLocaleDateString()}</div>
+                <div style="font-size: 12px; color: #666;">
+                  ${scan.location.lat.toFixed(4)}, ${scan.location.lng.toFixed(4)}
+                </div>
+              </div>
+            `)
+
+          newMarkers.push(marker)
+        })
+
+        // Fit bounds if there are scans
+        if (scans.length > 0 && newMarkers.length > 0) {
+          const group = new L.default.featureGroup(newMarkers)
+          mapInstance.fitBounds(group.getBounds().pad(0.1))
+        }
+
+        setMarkers(newMarkers)
+      } catch (error) {
+        console.error('Error updating markers:', error)
       }
     }
-  }, [scans, center])
+
+    updateMarkers()
+  }, [scans, mapInstance])
 
   return (
     <div className="relative h-[500px] w-full">
@@ -171,7 +305,8 @@ function InteractiveMap({ scans, center }: { scans: ScanData[]; center: [number,
         style={{ 
           minHeight: '500px',
           position: 'relative',
-          zIndex: 1
+          zIndex: 1,
+          display: 'block'
         }}
       />
       
@@ -390,13 +525,13 @@ export function InteractiveDashboardMap({ scans, className = "" }: InteractiveDa
                   </Badge>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Confidence:</span>
-                  <span className="text-sm font-medium">{selectedScan.confidence}%</span>
+                  <span className="text-sm text-muted-foreground">Health Score:</span>
+                  <span className="text-sm font-medium">{selectedScan.health}%</span>
                 </div>
                 {selectedScan.species && (
                   <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Species Confidence:</span>
-                    <span className="text-sm font-medium">{selectedScan.species.confidence}%</span>
+                    <span className="text-sm text-muted-foreground">Species Health:</span>
+                    <span className="text-sm font-medium">{selectedScan.species.health}%</span>
                   </div>
                 )}
               </div>

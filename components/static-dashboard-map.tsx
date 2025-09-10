@@ -11,14 +11,14 @@ interface ScanData {
   status: "healthy" | "unhealthy"
   location: { lat: number; lng: number }
   timestamp: Date
-  confidence: number
+  health: number
   species?: {
     name: string
-    confidence: number
+    health: number
   }
   disease?: {
     name: string
-    confidence: number
+    health: number
     isHealthy: boolean
   }
 }
@@ -300,13 +300,13 @@ export function StaticDashboardMap({ scans, className = "" }: StaticDashboardMap
                   </Badge>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Confidence:</span>
-                  <span className="text-sm font-medium">{selectedScan.confidence}%</span>
+                  <span className="text-sm text-muted-foreground">Health Score:</span>
+                  <span className="text-sm font-medium">{selectedScan.health}%</span>
                 </div>
                 {selectedScan.species && (
                   <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Species Confidence:</span>
-                    <span className="text-sm font-medium">{selectedScan.species.confidence}%</span>
+                    <span className="text-sm text-muted-foreground">Species Health:</span>
+                    <span className="text-sm font-medium">{selectedScan.species.health}%</span>
                   </div>
                 )}
               </div>

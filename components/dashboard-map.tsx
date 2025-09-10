@@ -11,14 +11,14 @@ interface ScanData {
   status: "healthy" | "unhealthy"
   location: { lat: number; lng: number }
   timestamp: Date
-  confidence: number
+  health: number
   species?: {
     name: string
-    confidence: number
+    health: number
   }
   disease?: {
     name: string
-    confidence: number
+    health: number
     isHealthy: boolean
   }
 }
@@ -253,7 +253,7 @@ export function DashboardMap({ scans, className = "" }: DashboardMapProps) {
                 ${isRecent ? '<span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">NEW</span>' : ''}
               </div>
               ${scan.species ? `<div style="margin-bottom: 4px;"><strong>Species:</strong> ${scan.species.name}</div>` : ''}
-              <div style="margin-bottom: 4px;"><strong>Confidence:</strong> ${scan.confidence}%</div>
+              <div style="margin-bottom: 4px;"><strong>Health:</strong> ${scan.health}%</div>
               <div style="margin-bottom: 8px;"><strong>Date:</strong> ${scan.timestamp.toLocaleDateString()}</div>
               <button onclick="window.selectScan('${scan.id}')" style="
                 background: #3b82f6; 
@@ -463,13 +463,13 @@ export function DashboardMap({ scans, className = "" }: DashboardMapProps) {
                   </Badge>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Confidence:</span>
-                  <span className="text-sm font-medium">{selectedScan.confidence}%</span>
+                  <span className="text-sm text-muted-foreground">Health Score:</span>
+                  <span className="text-sm font-medium">{selectedScan.health}%</span>
                 </div>
                 {selectedScan.species && (
                   <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Species Confidence:</span>
-                    <span className="text-sm font-medium">{selectedScan.species.confidence}%</span>
+                    <span className="text-sm text-muted-foreground">Species Health:</span>
+                    <span className="text-sm font-medium">{selectedScan.species.health}%</span>
                   </div>
                 )}
               </div>

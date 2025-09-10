@@ -10,6 +10,16 @@ export const metadata: Metadata = {
   title: 'AgriScan',
   description: 'Crop analysis platform',
   generator: 'v0.app',
+  icons: {
+    icon: '/agriscan-logo.png',
+    shortcut: '/agriscan-logo.png',
+    apple: '/agriscan-logo.png',
+  },
+  openGraph: {
+    title: 'AgriScan',
+    description: 'Crop analysis platform',
+    images: ['/agriscan-logo.png'],
+  },
 }
 
 export default function RootLayout({

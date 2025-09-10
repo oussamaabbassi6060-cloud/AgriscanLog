@@ -14,7 +14,7 @@ export async function getUserProfile(userId: string) {
   const supabase = await createSupabaseClient()
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select("id, clerk_id, username, email, gender, age, points, token, role, created_at, updated_at")
     .eq("clerk_id", userId)  // Using clerk_id instead of id
     .single()
 

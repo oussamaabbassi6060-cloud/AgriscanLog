@@ -13,6 +13,7 @@ interface AgriScanTestingProps {
   points: number
   onUpdatePoints: (newPoints: number) => void
   onBuyPoints: () => void // Added buy points callback prop
+  onShowDashboard?: () => void // Added dashboard callback prop
 }
 
 export type ScanResult = {
@@ -40,7 +41,7 @@ export type ScanResult = {
   }
 }
 
-export function AgriScanTesting({ points, onUpdatePoints, onBuyPoints }: AgriScanTestingProps) {
+export function AgriScanTesting({ points, onUpdatePoints, onBuyPoints, onShowDashboard }: AgriScanTestingProps) {
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [isScanning, setIsScanning] = useState(false)
@@ -542,6 +543,17 @@ export function AgriScanTesting({ points, onUpdatePoints, onBuyPoints }: AgriSca
                       <Button 
                         variant="outline" 
                         className="flex-1 h-14 text-lg bg-transparent border-2"
+                        onClick={() => {
+                          if (onShowDashboard) {
+                            onShowDashboard()
+                          } else {
+                            // Fallback: Try to click the dashboard button in the header
+                            const dashboardBtn = document.querySelector('[data-dashboard-button]')
+                            if (dashboardBtn instanceof HTMLElement) {
+                              dashboardBtn.click()
+                            }
+                          }
+                        }}
                       >
                         <MapPin className="w-5 h-5 mr-3" />
                         View in Dashboard

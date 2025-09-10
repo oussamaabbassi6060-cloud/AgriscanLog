@@ -1,0 +1,25 @@
+# Node artifacts
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js build output
+.next
+out
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# VCS
+.git
+.gitignore
+
+# OS / editor
+.DS_Store
+*.swp
+.idea
+.vscode

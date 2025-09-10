@@ -41,8 +41,18 @@ import {
   Brain,
   Stethoscope,
   Shield,
+  Crown,
+  Building2,
+  Users,
+  Settings,
+  ArrowLeft,
 } from "lucide-react"
 import { RealDashboardMap } from "@/components/real-dashboard-map"
+import { AdminDashboard } from "@/components/admin-dashboard"
+import { TeamAdminDashboard } from "@/components/team-admin-dashboard"
+import { UserRole } from "@/lib/admin-middleware"
+import { createClient } from "@/lib/supabase/client"
+import { useUser } from "@clerk/nextjs"
 
 interface ProfileData {
   id: string
@@ -53,6 +63,7 @@ interface ProfileData {
   age: number | null
   points: number
   token: string
+  role?: UserRole
   created_at: string
   updated_at: string
 }
@@ -81,7 +92,7 @@ const mockScans = [
     time: "09:15",
     image: "/placeholder-w5qcg.png",
     result: "Wheat Rust",
-    confidence: 87,
+    confidence: 0,
     treatment: "Apply fungicide treatment within 48 hours",
     location: "Field B-3",
   },
@@ -111,9 +122,12 @@ const mockScans = [
 const diseaseColors = ["#22c55e", "#ef4444", "#f97316", "#eab308", "#06b6d4", "#8b5cf6", "#14b8a6", "#f43f5e"]
 
 export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
+  const { user: clerkUser } = useUser()
   const [showApiDialog, setShowApiDialog] = useState(false)
   const [apiToken, setApiToken] = useState<string>("")
   const [isGeneratingToken, setIsGeneratingToken] = useState(false)
+  const [isTeamAdmin, setIsTeamAdmin] = useState(false)
+  const [userTeams, setUserTeams] = useState<any[]>([])
   const { toast } = useToast()
   
   // Load API token when dialog opens
@@ -177,7 +191,46 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
   const [realScans, setRealScans] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedScans, setExpandedScans] = useState<Set<string>>(new Set())
-  const [refreshingAI, setRefreshingAI] = useState(false)
+  const [teamsLoading, setTeamsLoading] = useState(true)
+
+  // Check if user is a team admin
+  useEffect(() => {
+    const checkTeamAdminStatus = async () => {
+      if (!clerkUser) return
+      
+      try {
+        const supabase = createClient()
+        
+        // Get user's profile
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('clerk_id', clerkUser.id)
+          .single()
+
+        if (profile) {
+          // Check if user is admin of any team
+          const { data: teams } = await supabase
+            .from('team_member_details')
+            .select('*')
+            .eq('user_id', profile.id)
+            .in('role', ['owner', 'admin'])
+            .eq('is_active', true)
+
+          if (teams && teams.length > 0) {
+            setIsTeamAdmin(true)
+            setUserTeams(teams)
+          }
+        }
+      } catch (error) {
+        console.error('Error checking team admin status:', error)
+      } finally {
+        setTeamsLoading(false)
+      }
+    }
+
+    checkTeamAdminStatus()
+  }, [clerkUser])
 
   // Fetch real scan data (initial + focus-based refresh only)
   useEffect(() => {
@@ -268,35 +321,89 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
     setExpandedScans(newExpanded)
   }
 
-  const refreshAIAnalysis = async () => {
-    setRefreshingAI(true)
-    try {
-      const response = await fetch('/api/refresh-analysis', {
-        method: 'POST'
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        console.log('AI analysis refresh result:', result)
-        
-        alert(`✅ AI analysis refreshed for ${result.scansRefreshed} scans!`)
-        
-        const scansResponse = await fetch('/api/scans')
-        if (scansResponse.ok) {
-          const { scans } = await scansResponse.json()
-          setRealScans(scans || [])
-        }
-      } else {
-        const error = await response.json()
-        alert(`❌ Failed to refresh AI analysis: ${error.error}`)
-      }
-    } catch (error) {
-      console.error('Error refreshing AI analysis:', error)
-      alert('❌ Error refreshing AI analysis. Please try again.')
-    } finally {
-      setRefreshingAI(false)
+  const downloadScanReport = (scan: any) => {
+    // Create report content
+    const isHealthy = scan.result === "Healthy" || scan.disease === "healthy"
+    const reportDate = new Date().toLocaleDateString()
+    const scanDate = new Date(scan.created_at || scan.date).toLocaleDateString()
+    
+    let reportContent = `AGRISCAN PLANT HEALTH REPORT
+${'='.repeat(50)}
+
+Report Generated: ${reportDate}
+Scan Date: ${scanDate}
+
+${'='.repeat(50)}
+PLANT IDENTIFICATION
+${'='.repeat(50)}
+
+Species: ${scan.species || 'Unknown'}
+
+${'='.repeat(50)}
+HEALTH STATUS
+${'='.repeat(50)}
+
+Status: ${isHealthy ? 'HEALTHY' : 'DISEASED'}
+`;
+
+    if (!isHealthy && scan.disease) {
+      reportContent += `Disease Detected: ${scan.disease}\n`;
     }
+    
+    reportContent += `Health Score: ${scan.disease_confidence || scan.confidence}%\n`;
+    
+    if (scan.location) {
+      reportContent += `\nLocation: ${scan.location}\n`;
+    }
+
+    // Add AI Analysis if available
+    if (scan.about_disease || scan.treatment_recommendations || scan.prevention_tips) {
+      reportContent += `\n${'='.repeat(50)}\nDETAILED AI ANALYSIS\n${'='.repeat(50)}\n`;
+      
+      if (scan.about_disease) {
+        reportContent += `\nABOUT THE CONDITION:\n${'-'.repeat(30)}\n${scan.about_disease}\n`;
+      }
+      
+      if (scan.treatment_recommendations) {
+        reportContent += `\nTREATMENT RECOMMENDATIONS:\n${'-'.repeat(30)}\n${scan.treatment_recommendations}\n`;
+      }
+      
+      if (scan.prevention_tips) {
+        reportContent += `\nPREVENTION TIPS:\n${'-'.repeat(30)}\n${scan.prevention_tips}\n`;
+      }
+    } else if (!isHealthy) {
+      reportContent += `\n${'='.repeat(50)}\nRECOMMENDATIONS\n${'='.repeat(50)}\n\n`;
+      reportContent += scan.treatment || 'Please consult with a plant specialist for specific treatment recommendations.\n';
+    } else {
+      reportContent += `\n${'='.repeat(50)}\nRECOMMENDATIONS\n${'='.repeat(50)}\n\n`;
+      reportContent += 'Your plant appears healthy! Continue with regular care:\n';
+      reportContent += '• Maintain appropriate watering schedule\n';
+      reportContent += '• Ensure adequate sunlight exposure\n';
+      reportContent += '• Monitor for any changes in plant health\n';
+      reportContent += '• Apply fertilizer as needed for your plant type\n';
+    }
+    
+    reportContent += `\n\n${'='.repeat(50)}\n`;
+    reportContent += `© ${new Date().getFullYear()} AgriScan - AI-Powered Plant Health Analysis\n`;
+    reportContent += `${'='.repeat(50)}\n`;
+
+    // Create blob and download
+    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `AgriScan_Report_${scan.species || 'Plant'}_${scanDate.replace(/\//g, '-')}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    toast({
+      title: "Report Downloaded",
+      description: "Your plant health report has been downloaded successfully.",
+    });
   }
+
 
   return (
     <div className="w-full mx-auto space-y-8">
@@ -306,7 +413,13 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 glass-subtle h-14">
+        <TabsList className={`grid w-full glass-subtle h-14 ${
+          userData?.role === 'admin' && isTeamAdmin
+            ? 'grid-cols-6'
+            : (userData?.role === 'admin' || userData?.role === 'super_admin') || (isTeamAdmin && userData?.role !== 'super_admin')
+              ? 'grid-cols-5' 
+              : 'grid-cols-4'
+        }`}>
           <TabsTrigger value="overview" className="flex items-center gap-2 text-base">
             <TrendingUp className="w-5 h-5" />
             Overview
@@ -323,6 +436,22 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
             <User className="w-5 h-5" />
             Profile
           </TabsTrigger>
+          {isTeamAdmin && userData?.role !== 'super_admin' && (
+            <TabsTrigger value="teams" className="flex items-center gap-2 text-base">
+              <Building2 className="w-5 h-5" />
+              Teams
+            </TabsTrigger>
+          )}
+          {(userData?.role === 'admin' || userData?.role === 'super_admin') && (
+            <TabsTrigger value="admin" className="flex items-center gap-2 text-base">
+              {userData.role === 'super_admin' ? (
+                <Crown className="w-5 h-5 text-yellow-500" />
+              ) : (
+                <Shield className="w-5 h-5 text-primary" />
+              )}
+              {userData.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="overview" className="space-y-10">
@@ -421,7 +550,7 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
                             variant={isHealthy ? "default" : "destructive"}
                             className="px-2 py-1"
                           >
-                            {scan.confidence}% confidence
+                            {scan.disease_confidence || scan.confidence}% health
                           </Badge>
                         </div>
                       )
@@ -449,9 +578,9 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
                 </div>
                 <div className="text-center p-4 glass-subtle rounded-lg">
                   <div className="text-3xl font-bold text-accent mb-2">
-                    {scansToUse.length > 0 ? Math.round(scansToUse.reduce((acc, s) => acc + (s.confidence || 0), 0) / scansToUse.length) : 0}%
+                    {scansToUse.length > 0 ? Math.round(scansToUse.reduce((acc, s) => acc + (s.disease_confidence || s.confidence || 0), 0) / scansToUse.length) : 0}%
                   </div>
-                  <div className="text-sm text-muted-foreground">Avg Confidence</div>
+                  <div className="text-sm text-muted-foreground">Avg Health Score</div>
                 </div>
                 {mostCommonDisease !== "None detected" && (
                   <div className="text-center p-4 glass-subtle rounded-lg border-l-4 border-red-500">
@@ -467,21 +596,8 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
         <TabsContent value="scans" className="space-y-6">
           <Card className="glass">
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-foreground">Scan History</CardTitle>
-                  <CardDescription>Complete list of all your plant scans</CardDescription>
-                </div>
-                <Button
-                  onClick={refreshAIAnalysis}
-                  disabled={refreshingAI}
-                  className="flex items-center gap-2"
-                  variant="outline"
-                >
-                  <Brain className={`w-4 h-4 ${refreshingAI ? 'animate-spin' : ''}`} />
-                  {refreshingAI ? 'Refreshing AI...' : 'Refresh AI Analysis'}
-                </Button>
-              </div>
+              <CardTitle className="text-foreground">Scan History</CardTitle>
+              <CardDescription>Complete list of all your plant scans</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
@@ -522,24 +638,14 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
                                       Disease: {diseaseInfo}
                                     </p>
                                   )}
-                                  {scan.species_confidence && (
-                                    <p className="text-sm text-muted-foreground">
-                                      Species confidence: {scan.species_confidence}%
-                                    </p>
-                                  )}
                                 </div>
                                 <div className="text-right">
                                   <Badge 
                                     variant={isHealthy ? "default" : "destructive"}
                                     className="text-base px-3 py-1"
                                   >
-                                    {scan.confidence}% confidence
+                                    {scan.disease_confidence || scan.confidence}% health
                                   </Badge>
-                                  {scan.disease_confidence && (
-                                    <p className="text-sm text-muted-foreground mt-1">
-                                      Health: {scan.disease_confidence}%
-                                    </p>
-                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-6 text-sm text-muted-foreground">
@@ -552,12 +658,6 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
                                   {scan.location || 'Location not recorded'}
                                 </div>
                               </div>
-                              {scan.treatment && (
-                                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
-                                  <h4 className="font-semibold text-sm text-blue-900 mb-1">Quick Treatment:</h4>
-                                  <p className="text-sm text-blue-800">{scan.treatment}</p>
-                                </div>
-                              )}
                               
                               {/* AI Analysis Section */}
                               <div className="border-t border-border/50 pt-4">
@@ -644,23 +744,22 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
                                       <Brain className="w-4 h-4 text-gray-400" />
                                       <span className="text-sm font-medium text-gray-600">AI Analysis Not Available</span>
                                     </div>
-                                    <p className="text-xs text-gray-500 mb-2">
-                                      This scan was processed before enhanced AI analysis was available or failed to process.
-                                    </p>
-                                    <p className="text-xs text-blue-600">
-                                      Use the "Refresh AI Analysis" button above to generate detailed insights for your existing scans.
+                                    <p className="text-xs text-gray-500">
+                                      This scan was processed before enhanced AI analysis was available.
                                     </p>
                                   </div>
                                 )}
                               </div>
                               
                               <div className="flex gap-3">
-                                <Button size="sm" variant="outline" className="bg-transparent">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="bg-transparent"
+                                  onClick={() => downloadScanReport(scan)}
+                                >
                                   <Download className="w-4 h-4 mr-2" />
                                   Download Report
-                                </Button>
-                                <Button size="sm" variant="ghost">
-                                  View Details
                                 </Button>
                               </div>
                             </div>
@@ -711,22 +810,22 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
                     }
                   }
                   
-                    return {
-                      id: scan.id.toString(),
-                      status: (scan.result === "Healthy" || scan.disease === "healthy") ? "healthy" as const : "unhealthy" as const,
-                      location: locationObj,
-                      timestamp: new Date(scan.created_at || scan.date || Date.now()),
-                      confidence: scan.confidence || 0,
-                      species: scan.species ? {
-                        name: scan.species,
-                        confidence: scan.species_confidence || 0
-                      } : undefined,
-                      disease: scan.disease ? {
-                        name: scan.disease,
-                        confidence: scan.disease_confidence || 0,
-                        isHealthy: scan.disease === "healthy"
-                      } : undefined
-                    }
+                  return {
+                    id: scan.id.toString(),
+                    status: (scan.result === "Healthy" || scan.disease === "healthy") ? "healthy" as const : "unhealthy" as const,
+                    location: locationObj,
+                    timestamp: new Date(scan.created_at || scan.date || Date.now()),
+                    health: scan.confidence || 0,
+                    species: scan.species ? {
+                      name: scan.species,
+                      health: scan.species_confidence || 0
+                    } : undefined,
+                    disease: scan.disease ? {
+                      name: scan.disease,
+                      health: scan.disease_confidence || 0,
+                      isHealthy: scan.disease === "healthy"
+                    } : undefined
+                  }
                   }).filter((result: any) => Number.isFinite(result.location.lat) && Number.isFinite(result.location.lng))
 
                   console.log('Dashboard: Original realScans:', realScans)
@@ -876,7 +975,7 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
                 
                 <div className="border-t border-border/50 pt-6">
                   <h3 className="text-lg font-semibold text-foreground mb-4">Account Actions</h3>
-                  <div className="flex gap-4">
+                  <div className="flex flex-wrap gap-4">
                     <Button onClick={onBuyPoints} className="flex items-center gap-2">
                       <CreditCard className="w-4 h-4" />
                       Buy More Credits
@@ -998,6 +1097,108 @@ curl -X POST "https://your-domain.com/api/scan" \\
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Teams Tab - Only for team admins who are not super admins */}
+        {isTeamAdmin && userData?.role !== 'super_admin' && (
+          <TabsContent value="teams" className="space-y-8">
+            {teamsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                <span className="ml-3 text-lg">Loading teams...</span>
+              </div>
+            ) : userTeams.length === 0 ? (
+              <Card className="glass">
+                <CardContent className="text-center py-12">
+                  <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No Teams Yet</h3>
+                  <p className="text-muted-foreground">
+                    You are not an admin of any team. Contact your super admin to be assigned to a team.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : userTeams.length === 1 ? (
+              // If user is admin of only one team, show the team dashboard directly
+              <TeamAdminDashboard 
+                teamId={userTeams[0].team_id} 
+                userRole={userTeams[0].role}
+              />
+            ) : (
+              // If user is admin of multiple teams, show team selection
+              <div className="space-y-6">
+                <Card className="glass">
+                  <CardHeader>
+                    <CardTitle className="text-2xl flex items-center gap-2">
+                      <Building2 className="h-6 w-6" />
+                      Your Teams
+                    </CardTitle>
+                    <CardDescription>
+                      Select a team to manage members and API keys
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {userTeams.map((team) => (
+                        <Card 
+                          key={team.id} 
+                          className="glass-subtle hover:shadow-lg transition-shadow cursor-pointer"
+                          onClick={() => setActiveTab(`team-${team.team_id}`)}
+                        >
+                          <CardHeader>
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <CardTitle className="text-lg">{team.team_name}</CardTitle>
+                                <CardDescription className="text-sm mt-1">
+                                  Joined {new Date(team.joined_at).toLocaleDateString()}
+                                </CardDescription>
+                              </div>
+                              <Badge variant={team.role === 'owner' ? 'destructive' : 'default'}>
+                                {team.role}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            <Button className="w-full">
+                              <Settings className="h-4 w-4 mr-2" />
+                              Manage Team
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                {/* Dynamic team tabs for each selected team */}
+                {userTeams.map((team) => (
+                  activeTab === `team-${team.team_id}` && (
+                    <div key={team.team_id}>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        className="mb-4"
+                        onClick={() => setActiveTab('teams')}
+                      >
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Back to Teams
+                      </Button>
+                      <TeamAdminDashboard 
+                        teamId={team.team_id} 
+                        userRole={team.role}
+                      />
+                    </div>
+                  )
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        )}
+
+        {/* Admin Tab */}
+        {(userData?.role === 'admin' || userData?.role === 'super_admin') && (
+          <TabsContent value="admin" className="space-y-8">
+            <AdminDashboard userRole={userData.role} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )
