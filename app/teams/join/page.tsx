@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,7 +23,7 @@ interface TeamInvitation {
   };
 }
 
-export default function JoinTeamPage() {
+function JoinTeamContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user, isLoaded } = useUser();
@@ -245,5 +245,20 @@ export default function JoinTeamPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function JoinTeamPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    }>
+      <JoinTeamContent />
+    </Suspense>
   );
 }

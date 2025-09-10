@@ -1,0 +1,53 @@
+[build]
+  # Build command for Next.js
+  command = "npm run build"
+  
+  # Node.js version to use during build
+  environment = { NODE_VERSION = "18" }
+
+[build.processing]
+  # Skip processing for better performance
+  skip_processing = false
+
+[build.processing.css]
+  # Don't minify CSS (Next.js handles this)
+  bundle = false
+  minify = false
+
+[build.processing.js]
+  # Don't minify JS (Next.js handles this)
+  bundle = false
+  minify = false
+
+# Redirects for Next.js routing (SPA fallback)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Environment variables (you'll need to set these in Netlify dashboard)
+# NEXT_PUBLIC_SUPABASE_URL = "your-supabase-url"
+# NEXT_PUBLIC_SUPABASE_ANON_KEY = "your-supabase-anon-key"
+# GROQ_API_KEY = "your-groq-api-key"
+# CLERK_PUBLISHABLE_KEY = "your-clerk-publishable-key"
+# CLERK_SECRET_KEY = "your-clerk-secret-key"
+
+# Headers for better security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Cache static assets
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, immutable, max-age=31536000"
+
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, immutable, max-age=31536000"
