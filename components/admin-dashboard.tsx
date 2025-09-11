@@ -131,8 +131,8 @@ const roleColors = {
 }
 
 const roleLabels = {
-  user: "User",
-  admin: "Admin",
+  user: "Member",
+  admin: "Team Admin",
   super_admin: "Super Admin"
 }
 
@@ -157,6 +157,7 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
   const [newTeamName, setNewTeamName] = useState("")
   const [newTeamDescription, setNewTeamDescription] = useState("")
   const [newTeamAdminEmail, setNewTeamAdminEmail] = useState("")
+  const [updatingRole, setUpdatingRole] = useState<string | null>(null)
 
   const { toast } = useToast()
 
@@ -315,6 +316,43 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
     }
   }
 
+  // Update user role
+  const handleUpdateRole = async (userId: string, newRole: string) => {
+    setUpdatingRole(userId)
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, role: newRole })
+      })
+      
+      const data = await response.json()
+      
+      if (response.ok) {
+        toast({
+          title: "Role Updated",
+          description: data.message,
+        })
+        fetchUsers() // Refresh users list
+        fetchStats() // Refresh stats
+      } else {
+        toast({
+          title: "Update Failed",
+          description: data.error || 'Failed to update user role',
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Update Failed",
+        description: "An error occurred while updating the user role",
+        variant: "destructive",
+      })
+    } finally {
+      setUpdatingRole(null)
+    }
+  }
+
   // Delete user
   const handleDeleteUser = async () => {
     if (!userToDelete) return
@@ -364,6 +402,13 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
       fetchTeams()
     }
   }, [userRole])
+
+  // Re-fetch teams when activeTab changes to Team Management
+  useEffect(() => {
+    if (activeTab === 'teams' && userRole === 'super_admin') {
+      fetchTeams()
+    }
+  }, [activeTab, userRole])
 
   useEffect(() => {
     fetchUsers()
@@ -553,8 +598,7 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Roles</SelectItem>
-                  <SelectItem value="user">Users</SelectItem>
-                  <SelectItem value="admin">Admins</SelectItem>
+                  <SelectItem value="admin">Team Admins</SelectItem>
                   <SelectItem value="super_admin">Super Admins</SelectItem>
                 </SelectContent>
               </Select>
@@ -569,7 +613,7 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
             </div>
           ) : (
             <div className="space-y-4">
-              {users.map((user) => (
+              {users.filter(user => userRole === 'super_admin' || user.role !== 'super_admin').map((user) => (
                 <div key={user.id} className="flex items-center justify-between p-4 glass-subtle rounded-lg">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
@@ -583,7 +627,9 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
                     </div>
                     <div>
                       <h3 className="font-semibold text-foreground">{user.username}</h3>
-                      <p className="text-sm text-muted-foreground">{user.email}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {userRole === 'super_admin' ? user.email : '••••@••••.•••'}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         Joined {new Date(user.created_at).toLocaleDateString()}
                       </p>
@@ -591,15 +637,21 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="text-right">
-                      <Badge 
-                        variant={user.role === 'super_admin' ? 'destructive' : user.role === 'admin' ? 'default' : 'secondary'}
-                        className="mb-1"
-                      >
-                        {roleLabels[user.role]}
-                      </Badge>
-                      <p className="text-sm text-muted-foreground">{user.points} credits</p>
+                      {/* Only show role badge for admins and super admins, not for regular users */}
+                      {(user.role === 'admin' || user.role === 'super_admin') && (
+                        <Badge 
+                          variant={user.role === 'super_admin' ? 'destructive' : 'default'}
+                          className="mb-1"
+                        >
+                          {roleLabels[user.role]}
+                        </Badge>
+                      )}
+                      {userRole === 'super_admin' && (
+                        <p className="text-sm text-muted-foreground">{user.points} credits</p>
+                      )}
                     </div>
-                    {user.role !== 'super_admin' && (userRole === 'super_admin' || user.role === 'user') && (
+                    {/* Only super admins can delete users */}
+                    {userRole === 'super_admin' && user.role !== 'super_admin' && (
                       <Button
                         variant="destructive"
                         size="sm"
@@ -656,7 +708,18 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
                 </CardTitle>
                 <CardDescription>Create and manage teams across the platform</CardDescription>
               </div>
-              <Dialog open={createTeamDialogOpen} onOpenChange={setCreateTeamDialogOpen}>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={fetchTeams} 
+                  variant="outline" 
+                  size="sm"
+                  className="flex items-center gap-2"
+                  disabled={teamsLoading}
+                >
+                  <RefreshCw className={`w-4 h-4 ${teamsLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Dialog open={createTeamDialogOpen} onOpenChange={setCreateTeamDialogOpen}>
                 <DialogTrigger asChild>
                   <Button className="flex items-center gap-2">
                     <UserPlus className="w-4 h-4" />
@@ -716,7 +779,8 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
                     </Button>
                   </div>
                 </DialogContent>
-              </Dialog>
+                </Dialog>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -757,7 +821,7 @@ export function AdminDashboard({ userRole }: AdminDashboardProps) {
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">Members:</span>
                           <span className="font-medium">
-                            {team.team_members?.[0]?.aggregate?.count || 0}
+                            {team.team_members?.[0]?.count || 0}
                           </span>
                         </div>
                         <div className="flex items-center justify-between">

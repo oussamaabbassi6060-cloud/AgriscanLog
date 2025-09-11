@@ -37,27 +37,25 @@ interface TeamMember {
   user_id: string;
   username: string;
   email: string;
-  role: 'owner' | 'admin' | 'member' | 'viewer';
+  role: 'admin' | 'member';
   joined_at: string;
   is_active: boolean;
   global_role?: string;
 }
 
-interface TeamApiKey {
+interface MemberToken {
   id: string;
-  name: string;
-  api_key: string;
-  api_provider: string;
-  created_at: string;
-  last_used_at?: string;
-  usage_count: number;
-  usage_limit?: number;
-  expires_at?: string;
-  is_active: boolean;
-  is_decrypted?: boolean;
-  creator?: {
-    username: string;
-    email: string;
+  user_id: string;
+  team_role: 'admin' | 'member';
+  joined_at: string;
+  username: string;
+  email: string;
+  user_role: string;
+  points: number;
+  token: {
+    value: string;
+    masked: boolean;
+    exists: boolean;
   };
 }
 
@@ -72,34 +70,34 @@ interface Team {
 
 interface TeamAdminDashboardProps {
   teamId: string;
-  userRole: 'owner' | 'admin' | 'member' | 'viewer';
+  userRole: 'admin' | 'member';
+  isSuperAdmin?: boolean;
   defaultTab?: 'api-keys' | 'members' | 'activity';
 }
 
-export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }: TeamAdminDashboardProps) {
+export function TeamAdminDashboard({ teamId, userRole, isSuperAdmin = false, defaultTab = 'api-keys' }: TeamAdminDashboardProps) {
   const [team, setTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [apiKeys, setApiKeys] = useState<TeamApiKey[]>([]);
+  const [memberTokens, setMemberTokens] = useState<MemberToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(defaultTab);
+  const [canViewFullTokens, setCanViewFullTokens] = useState(false);
   
   // Dialog states
   const [addMemberOpen, setAddMemberOpen] = useState(false);
-  const [addApiKeyOpen, setAddApiKeyOpen] = useState(false);
   const [editMemberOpen, setEditMemberOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   
   // Form states
   const [newMemberEmail, setNewMemberEmail] = useState('');
-  const [newMemberRole, setNewMemberRole] = useState<'admin' | 'member' | 'viewer'>('member');
-  const [newApiKeyName, setNewApiKeyName] = useState('');
-  const [newApiKey, setNewApiKey] = useState('');
-  const [newApiProvider, setNewApiProvider] = useState('');
-  const [showApiKeys, setShowApiKeys] = useState<{ [key: string]: boolean }>({});
+  const [newMemberRole, setNewMemberRole] = useState<'admin' | 'member'>('member');
+  const [showTokens, setShowTokens] = useState<{ [key: string]: boolean }>({});
 
-  const canManageMembers = userRole === 'owner' || userRole === 'admin';
-  const canManageApiKeys = userRole === 'owner' || userRole === 'admin';
-  const canEditTeam = userRole === 'owner' || userRole === 'admin';
+  const canManageMembers = userRole === 'admin' || isSuperAdmin;
+  const canManageApiKeys = userRole === 'admin' || isSuperAdmin;
+  const canEditTeam = userRole === 'admin' || isSuperAdmin;
+  // Only team members can view tokens within their team
+  const canViewTokens = userRole === 'admin' || userRole === 'member';
 
   useEffect(() => {
     fetchTeamData();
@@ -120,14 +118,23 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
       const membersRes = await fetch(`/api/teams/members?teamId=${teamId}`);
       if (membersRes.ok) {
         const membersData = await membersRes.json();
-        setMembers(membersData.members);
+        // Filter out super admin members unless current user is super admin
+        const filteredMembers = (membersData.members || []).filter(
+          (member: TeamMember) => isSuperAdmin || member.global_role !== 'super_admin'
+        );
+        setMembers(filteredMembers);
       }
       
-      // Fetch API keys
-      const apiKeysRes = await fetch(`/api/teams/api-keys?teamId=${teamId}`);
-      if (apiKeysRes.ok) {
-        const apiKeysData = await apiKeysRes.json();
-        setApiKeys(apiKeysData.apiKeys);
+      // Fetch member tokens
+      const tokensRes = await fetch(`/api/teams/tokens?teamId=${teamId}`);
+      if (tokensRes.ok) {
+        const tokensData = await tokensRes.json();
+        // Filter out super admin tokens unless current user is super admin
+        const filteredTokens = (tokensData.tokens || []).filter(
+          (token: MemberToken) => isSuperAdmin || token.user_role !== 'super_admin'
+        );
+        setMemberTokens(filteredTokens);
+        setCanViewFullTokens(tokensData.canViewFull);
       }
     } catch (error) {
       console.error('Error fetching team data:', error);
@@ -212,91 +219,40 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
     }
   };
 
-  const handleAddApiKey = async () => {
-    try {
-      const response = await fetch('/api/teams/api-keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId,
-          name: newApiKeyName,
-          apiKey: newApiKey,
-          apiProvider: newApiProvider
-        })
-      });
-
-      if (response.ok) {
-        toast.success('API key added successfully');
-        setAddApiKeyOpen(false);
-        setNewApiKeyName('');
-        setNewApiKey('');
-        setNewApiProvider('');
-        fetchTeamData();
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Failed to add API key');
-      }
-    } catch (error) {
-      console.error('Error adding API key:', error);
-      toast.error('Failed to add API key');
+  const handleToggleToken = async (userId: string) => {
+    // All team members can view tokens within their team
+    if (!canViewTokens) {
+      toast.error('You do not have permission to view tokens');
+      return;
     }
-  };
-
-  const handleToggleApiKey = async (apiKeyId: string) => {
-    if (showApiKeys[apiKeyId]) {
-      setShowApiKeys({ ...showApiKeys, [apiKeyId]: false });
-    } else {
+    
+    if (!showTokens[userId]) {
+      // Fetch full token
       try {
-        const response = await fetch(`/api/teams/api-keys?teamId=${teamId}&decrypt=true`);
+        const response = await fetch(`/api/teams/tokens?teamId=${teamId}&showFull=true`);
         if (response.ok) {
           const data = await response.json();
-          const decryptedKey = data.apiKeys.find((k: TeamApiKey) => k.id === apiKeyId);
-          if (decryptedKey && decryptedKey.is_decrypted) {
-            setApiKeys(apiKeys.map(k => 
-              k.id === apiKeyId ? { ...k, api_key: decryptedKey.api_key, is_decrypted: true } : k
-            ));
-            setShowApiKeys({ ...showApiKeys, [apiKeyId]: true });
-          }
+          setMemberTokens(data.tokens);
+          setShowTokens({ ...showTokens, [userId]: true });
         }
       } catch (error) {
-        console.error('Error decrypting API key:', error);
-        toast.error('Failed to decrypt API key');
+        toast.error('Failed to fetch full tokens');
       }
+    } else {
+      setShowTokens({ ...showTokens, [userId]: false });
     }
   };
 
-  const handleDeleteApiKey = async (apiKeyId: string) => {
-    if (!confirm('Are you sure you want to delete this API key?')) return;
-    
-    try {
-      const response = await fetch(`/api/teams/api-keys?apiKeyId=${apiKeyId}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        toast.success('API key deleted');
-        fetchTeamData();
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Failed to delete API key');
-      }
-    } catch (error) {
-      console.error('Error deleting API key:', error);
-      toast.error('Failed to delete API key');
-    }
-  };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast.success('Copied to clipboard');
+    toast.success('Token copied to clipboard');
   };
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'owner': return 'destructive';
-      case 'admin': return 'default';
+      case 'admin': return 'destructive';
       case 'member': return 'secondary';
-      case 'viewer': return 'outline';
       default: return 'outline';
     }
   };
@@ -321,7 +277,7 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
                 {team?.name}
               </CardTitle>
               <CardDescription>
-                {team?.description || 'Share API keys and collaborate with your team'}
+                {team?.description || 'Team members share AgriScan API tokens for collaborative plant disease detection'}
               </CardDescription>
               <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
                 <span className="flex items-center gap-1">
@@ -330,7 +286,7 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
                 </span>
                 <span className="flex items-center gap-1">
                   <Key className="h-4 w-4" />
-                  {apiKeys.length} API keys
+                  {memberTokens.filter(m => m.token.exists).length} member tokens
                 </span>
                 <span className="flex items-center gap-1">
                   <Shield className="h-4 w-4" />
@@ -350,7 +306,7 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="api-keys" className="flex items-center gap-2">
             <Key className="h-4 w-4" />
-            Shared API Keys ({apiKeys.length})
+            Shared API Keys ({memberTokens.length})
           </TabsTrigger>
           <TabsTrigger value="members" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
@@ -403,7 +359,6 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
                             <SelectContent>
                               <SelectItem value="admin">Admin</SelectItem>
                               <SelectItem value="member">Member</SelectItem>
-                              <SelectItem value="viewer">Viewer</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -469,27 +424,23 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
                       {canManageMembers && (
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            {member.role !== 'owner' && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setSelectedMember(member);
-                                    setEditMemberOpen(true);
-                                  }}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleRemoveMember(member.id)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setSelectedMember(member);
+                                setEditMemberOpen(true);
+                              }}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleRemoveMember(member.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       )}
@@ -501,133 +452,123 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
           </Card>
         </TabsContent>
 
-        {/* API Keys Tab */}
+        {/* Team Member Tokens Tab */}
         <TabsContent value="api-keys" className="space-y-4">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>API Keys</CardTitle>
-                {canManageApiKeys && (
-                  <Dialog open={addApiKeyOpen} onOpenChange={setAddApiKeyOpen}>
-                    <DialogTrigger asChild>
-                      <Button size="sm">
-                        <KeyRound className="h-4 w-4 mr-2" />
-                        Add API Key
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Add API Key</DialogTitle>
-                        <DialogDescription>
-                          Add a new API key for your team to use.
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="key-name">Name</Label>
-                          <Input
-                            id="key-name"
-                            value={newApiKeyName}
-                            onChange={(e) => setNewApiKeyName(e.target.value)}
-                            placeholder="My API Key"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="provider">Provider</Label>
-                          <Select value={newApiProvider} onValueChange={setNewApiProvider}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select provider" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="openai">OpenAI</SelectItem>
-                              <SelectItem value="anthropic">Anthropic</SelectItem>
-                              <SelectItem value="google">Google</SelectItem>
-                              <SelectItem value="huggingface">Hugging Face</SelectItem>
-                              <SelectItem value="other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label htmlFor="api-key">API Key</Label>
-                          <Input
-                            id="api-key"
-                            type="password"
-                            value={newApiKey}
-                            onChange={(e) => setNewApiKey(e.target.value)}
-                            placeholder="sk-..."
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setAddApiKeyOpen(false)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleAddApiKey}>Add API Key</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                )}
+                <div>
+                  <CardTitle>Team Member AgriScan Tokens</CardTitle>
+                  <CardDescription className="mt-1">
+                    Access tokens from all team members for AgriScan plant disease detection.
+                    {canViewTokens && (
+                      <span className="block mt-1 text-green-600 dark:text-green-400">
+                        ✓ All team members can view and use shared tokens
+                      </span>
+                    )}
+                  </CardDescription>
+                </div>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={fetchTeamData}
+                  className="flex items-center gap-2"
+                >
+                  <Activity className="h-4 w-4" />
+                  Refresh
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
-              {apiKeys.length === 0 ? (
+              {memberTokens.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
-                  No API keys added yet
+                  <Key className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                  <p>No team members with tokens yet</p>
+                  <p className="text-sm mt-2">Add members to the team to access their AgriScan tokens</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {apiKeys.map((apiKey) => (
-                    <Card key={apiKey.id}>
+                  {memberTokens.map((member) => (
+                    <Card key={member.id} className="overflow-hidden">
                       <CardContent className="pt-6">
                         <div className="flex items-start justify-between">
-                          <div className="space-y-2 flex-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold">{apiKey.name}</h4>
-                              <Badge variant="outline">{apiKey.api_provider}</Badge>
-                              {!apiKey.is_active && (
-                                <Badge variant="destructive">Inactive</Badge>
-                              )}
+                          <div className="space-y-3 flex-1">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                                <Users className="h-5 w-5 text-primary" />
+                              </div>
+                              <div>
+                                <h4 className="font-semibold">{member.username}</h4>
+                                <p className="text-sm text-muted-foreground">{member.email}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Badge variant={getRoleBadgeColor(member.team_role)}>
+                                  {member.team_role}
+                                </Badge>
+                                {member.user_role === 'admin' && (
+                                  <Badge variant="secondary">Admin</Badge>
+                                )}
+                                {member.user_role === 'super_admin' && (
+                                  <Badge variant="destructive">Super Admin</Badge>
+                                )}
+                              </div>
                             </div>
+                            
                             <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                              <span>Created: {new Date(apiKey.created_at).toLocaleDateString()}</span>
-                              {apiKey.last_used_at && (
-                                <span>Last used: {new Date(apiKey.last_used_at).toLocaleDateString()}</span>
-                              )}
-                              {apiKey.usage_limit && (
-                                <span>Usage: {apiKey.usage_count}/{apiKey.usage_limit}</span>
-                              )}
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                Joined: {new Date(member.joined_at).toLocaleDateString()}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Activity className="h-3 w-3" />
+                                {member.points} credits
+                              </span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <code className="px-2 py-1 bg-muted rounded text-sm">
-                                {showApiKeys[apiKey.id] && apiKey.is_decrypted ? apiKey.api_key : maskApiKey(apiKey.api_key)}
-                              </code>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleToggleApiKey(apiKey.id)}
-                              >
-                                {showApiKeys[apiKey.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                              </Button>
-                              {showApiKeys[apiKey.id] && apiKey.is_decrypted && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => copyToClipboard(apiKey.api_key)}
-                                >
-                                  <Copy className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
+                            
+                            {member.token.exists ? (
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                  <Label className="text-xs text-muted-foreground">AgriScan Token</Label>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <code className="px-3 py-2 bg-muted rounded text-sm font-mono flex-1">
+                                      {canViewTokens && showTokens[member.user_id] && !member.token.masked 
+                                        ? member.token.value 
+                                        : member.token.masked ? member.token.value : '••••••••••••'}
+                                    </code>
+                                    {canViewTokens && (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => handleToggleToken(member.user_id)}
+                                          title="Toggle token visibility"
+                                        >
+                                          {showTokens[member.user_id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                        </Button>
+                                        {showTokens[member.user_id] && !member.token.masked && (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={() => copyToClipboard(member.token.value)}
+                                            title="Copy token to clipboard"
+                                          >
+                                            <Copy className="h-4 w-4" />
+                                          </Button>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <Alert className="py-2">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription>
+                                  This member doesn't have an AgriScan token yet
+                                </AlertDescription>
+                              </Alert>
+                            )}
                           </div>
-                          {canManageApiKeys && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleDeleteApiKey(apiKey.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -678,7 +619,6 @@ export function TeamAdminDashboard({ teamId, userRole, defaultTab = 'api-keys' }
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="member">Member</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>
             </div>

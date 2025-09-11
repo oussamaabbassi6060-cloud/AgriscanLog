@@ -294,7 +294,47 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
-    // Delete the team (cascades to related tables)
+    // First delete related team activities to avoid constraint issues
+    const { error: activitiesError } = await supabase
+      .from('team_activities')
+      .delete()
+      .eq('team_id', teamId);
+      
+    if (activitiesError) {
+      console.error('Error deleting team activities:', activitiesError);
+    }
+    
+    // Delete team API keys
+    const { error: apiKeysError } = await supabase
+      .from('team_api_keys')
+      .delete()
+      .eq('team_id', teamId);
+      
+    if (apiKeysError) {
+      console.error('Error deleting team API keys:', apiKeysError);
+    }
+    
+    // Delete team members
+    const { error: membersError } = await supabase
+      .from('team_members')
+      .delete()
+      .eq('team_id', teamId);
+      
+    if (membersError) {
+      console.error('Error deleting team members:', membersError);
+    }
+    
+    // Delete team invitations
+    const { error: invitationsError } = await supabase
+      .from('team_invitations')
+      .delete()
+      .eq('team_id', teamId);
+      
+    if (invitationsError) {
+      console.error('Error deleting team invitations:', invitationsError);
+    }
+    
+    // Finally delete the team
     const { error: deleteError } = await supabase
       .from('teams')
       .delete()

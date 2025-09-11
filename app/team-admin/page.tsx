@@ -63,12 +63,12 @@ export default function TeamAdminDashboard() {
         return;
       }
 
-      // Get teams where user is an admin or owner
+      // Get teams where user is an admin
       const { data: userTeams, error: teamsError } = await supabase
         .from('team_member_details')
         .select('*')
         .eq('user_id', profile.id)
-        .in('role', ['owner', 'admin'])
+        .eq('role', 'admin')
         .eq('is_active', true);
 
       if (teamsError) {
@@ -156,7 +156,7 @@ export default function TeamAdminDashboard() {
                     Joined {new Date(team.joined_at).toLocaleDateString()}
                   </CardDescription>
                 </div>
-                <Badge variant={team.role === 'owner' ? 'destructive' : 'default'}>
+                <Badge variant={team.role === 'admin' ? 'destructive' : 'secondary'}>
                   {team.role}
                 </Badge>
               </div>

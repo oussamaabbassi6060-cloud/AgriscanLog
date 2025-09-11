@@ -54,7 +54,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch team members' }, { status: 500 });
     }
 
-    return NextResponse.json({ members });
+    // Filter out super admin members unless the current user is a super admin
+    const filteredMembers = profile.role === 'super_admin' 
+      ? members 
+      : members?.filter(member => member.global_role !== 'super_admin') || [];
+
+    return NextResponse.json({ members: filteredMembers });
   } catch (error) {
     console.error('Error in GET /api/teams/members:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -107,12 +112,17 @@ export async function POST(request: NextRequest) {
     // Find the user to add by email
     const { data: targetProfile, error: targetError } = await supabase
       .from('profiles')
-      .select('id, username, email')
+      .select('id, username, email, role')
       .eq('email', userEmail)
       .single();
 
     if (targetError || !targetProfile) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    // Prevent adding super admins to teams
+    if (targetProfile.role === 'super_admin') {
+      return NextResponse.json({ error: 'Super admins cannot be added to teams' }, { status: 400 });
     }
 
     // Check if user is already a member

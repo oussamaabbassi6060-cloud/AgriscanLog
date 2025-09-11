@@ -169,11 +169,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
-    // Super admins cannot add API keys to teams (they should not share their personal keys)
-    if (profile.role === 'super_admin') {
-      return NextResponse.json({ error: 'Super admins cannot add API keys to teams' }, { status: 403 });
-    }
-
     // Check if user has permission to add API keys
     const { data: permission } = await supabase
       .rpc('check_team_permission', {

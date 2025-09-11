@@ -2,27 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { TeamAdminDashboard } from '@/components/team-admin-dashboard';
+import { UserTeamsDashboard } from '@/components/user-teams-dashboard';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Shield, AlertCircle } from 'lucide-react';
+import { ArrowLeft, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useUser } from '@clerk/nextjs';
 
-interface TeamMember {
-  user_id: string;
-  role: 'admin' | 'member';
-}
-
-export default function TeamManagementPage() {
+export default function TeamPage() {
   const params = useParams();
   const router = useRouter();
   const { user, isLoaded } = useUser();
   const teamId = params.teamId as string;
   
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState<'admin' | 'member' | null>(null);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +38,7 @@ export default function TeamManagementPage() {
       
       const supabase = createClient();
       
-      // Get user's profile to check if they're a super admin
+      // Get user's profile
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('id, role')
@@ -54,15 +47,6 @@ export default function TeamManagementPage() {
 
       if (profileError || !profile) {
         setError('User profile not found');
-        setLoading(false);
-        return;
-      }
-
-      // Check if user is super admin
-      if (profile.role === 'super_admin') {
-        setIsSuperAdmin(true);
-        setHasAccess(true);
-        setUserRole('admin'); // Super admins have admin-level access
         setLoading(false);
         return;
       }
@@ -83,7 +67,6 @@ export default function TeamManagementPage() {
         return;
       }
 
-      setUserRole(membership.role);
       setHasAccess(true);
     } catch (err) {
       console.error('Error checking access:', err);
@@ -114,12 +97,12 @@ export default function TeamManagementPage() {
           </AlertDescription>
         </Alert>
         <Button
-          onClick={() => router.push('/dashboard')}
+          onClick={() => router.push('/teams')}
           className="mt-4"
           variant="outline"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Dashboard
+          Back to Teams
         </Button>
       </div>
     );
@@ -127,20 +110,7 @@ export default function TeamManagementPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      {isSuperAdmin && (
-        <div className="mb-6 flex items-center justify-end">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Shield className="h-4 w-4 text-yellow-500" />
-            <span>Super Admin Access</span>
-          </div>
-        </div>
-      )}
-
-      <TeamAdminDashboard 
-        teamId={teamId} 
-        userRole={userRole || 'member'}
-        isSuperAdmin={isSuperAdmin}
-      />
+      <UserTeamsDashboard teamId={teamId} />
     </div>
   );
 }

@@ -50,6 +50,7 @@ import {
 import { RealDashboardMap } from "@/components/real-dashboard-map"
 import { AdminDashboard } from "@/components/admin-dashboard"
 import { TeamAdminDashboard } from "@/components/team-admin-dashboard"
+import { UserTeamsDashboard } from "@/components/user-teams-dashboard"
 import { UserRole } from "@/lib/admin-middleware"
 import { createClient } from "@/lib/supabase/client"
 import { useUser } from "@clerk/nextjs"
@@ -74,49 +75,7 @@ interface DashboardProps {
   onBuyPoints: () => void
 }
 
-// Mock data for demonstration (used only if no real data is available)
-const mockScans = [
-  {
-    id: 1,
-    date: "2024-01-15",
-    time: "14:30",
-    image: "/placeholder-uwum6.png",
-    result: "Healthy",
-    confidence: 95,
-    treatment: "Continue current care routine",
-    location: "Field A-1",
-  },
-  {
-    id: 2,
-    date: "2024-01-14",
-    time: "09:15",
-    image: "/placeholder-w5qcg.png",
-    result: "Wheat Rust",
-    confidence: 0,
-    treatment: "Apply fungicide treatment within 48 hours",
-    location: "Field B-3",
-  },
-  {
-    id: 3,
-    date: "2024-01-13",
-    time: "16:45",
-    image: "/placeholder-bzzds.png",
-    result: "Healthy",
-    confidence: 92,
-    treatment: "Maintain current irrigation schedule",
-    location: "Field C-2",
-  },
-  {
-    id: 4,
-    date: "2024-01-12",
-    time: "11:20",
-    image: "/placeholder-0hsth.png",
-    result: "Late Blight",
-    confidence: 89,
-    treatment: "Remove affected plants, apply copper-based fungicide",
-    location: "Field A-4",
-  },
-]
+// Mock data removed - only real data will be used
 
 // Color palette for dynamic disease distribution
 const diseaseColors = ["#22c55e", "#ef4444", "#f97316", "#eab308", "#06b6d4", "#8b5cf6", "#14b8a6", "#f43f5e"]
@@ -127,6 +86,7 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
   const [apiToken, setApiToken] = useState<string>("")
   const [isGeneratingToken, setIsGeneratingToken] = useState(false)
   const [isTeamAdmin, setIsTeamAdmin] = useState(false)
+  const [isTeamMember, setIsTeamMember] = useState(false)
   const [userTeams, setUserTeams] = useState<any[]>([])
   const { toast } = useToast()
   
@@ -188,14 +148,15 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
   }
 
   const [activeTab, setActiveTab] = useState("overview")
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
   const [realScans, setRealScans] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedScans, setExpandedScans] = useState<Set<string>>(new Set())
   const [teamsLoading, setTeamsLoading] = useState(true)
 
-  // Check if user is a team admin
+  // Check if user is part of any team
   useEffect(() => {
-    const checkTeamAdminStatus = async () => {
+    const checkTeamStatus = async () => {
       if (!clerkUser) return
       
       try {
@@ -209,27 +170,31 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
           .single()
 
         if (profile) {
-          // Check if user is admin of any team
+          // Get all teams user is a member of
           const { data: teams } = await supabase
             .from('team_member_details')
             .select('*')
             .eq('user_id', profile.id)
-            .in('role', ['owner', 'admin'])
             .eq('is_active', true)
 
           if (teams && teams.length > 0) {
-            setIsTeamAdmin(true)
             setUserTeams(teams)
+            setIsTeamMember(true)
+            // Check if user is admin of any team
+            const adminTeams = teams.filter(t => t.role === 'admin')
+            if (adminTeams.length > 0) {
+              setIsTeamAdmin(true)
+            }
           }
         }
       } catch (error) {
-        console.error('Error checking team admin status:', error)
+        console.error('Error checking team status:', error)
       } finally {
         setTeamsLoading(false)
       }
     }
 
-    checkTeamAdminStatus()
+    checkTeamStatus()
   }, [clerkUser])
 
   // Fetch real scan data (initial + focus-based refresh only)
@@ -268,8 +233,8 @@ export function Dashboard({ points, userData, onBuyPoints }: DashboardProps) {
     }
   }, [])
 
-  // Use real data if available, fallback to mock data
-  const scansToUse = realScans.length > 0 ? realScans : mockScans
+  // Only use real data - no mock data fallback
+  const scansToUse = realScans
   const totalScans = scansToUse.length
   const healthyScans = scansToUse.filter((scan) => 
     scan.result === "Healthy" || scan.disease === "healthy"
@@ -414,10 +379,10 @@ Status: ${isHealthy ? 'HEALTHY' : 'DISEASED'}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className={`grid w-full glass-subtle h-14 ${
-          userData?.role === 'admin' && isTeamAdmin
-            ? 'grid-cols-6'
-            : (userData?.role === 'admin' || userData?.role === 'super_admin') || (isTeamAdmin && userData?.role !== 'super_admin')
-              ? 'grid-cols-5' 
+          userData?.role === 'admin' || userData?.role === 'super_admin'
+            ? 'grid-cols-5'
+            : isTeamMember
+              ? 'grid-cols-5'
               : 'grid-cols-4'
         }`}>
           <TabsTrigger value="overview" className="flex items-center gap-2 text-base">
@@ -436,7 +401,7 @@ Status: ${isHealthy ? 'HEALTHY' : 'DISEASED'}
             <User className="w-5 h-5" />
             Profile
           </TabsTrigger>
-          {isTeamAdmin && userData?.role !== 'super_admin' && (
+          {isTeamMember && userData?.role !== 'super_admin' && userData?.role !== 'admin' && (
             <TabsTrigger value="teams" className="flex items-center gap-2 text-base">
               <Building2 className="w-5 h-5" />
               Teams
@@ -463,7 +428,9 @@ Status: ${isHealthy ? 'HEALTHY' : 'DISEASED'}
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-foreground">{totalScans}</div>
-                <p className="text-sm text-muted-foreground">+2 from last week</p>
+                <p className="text-sm text-muted-foreground">
+                  {totalScans > 0 ? 'All time scans' : 'No scans yet'}
+                </p>
               </CardContent>
             </Card>
 
@@ -475,7 +442,7 @@ Status: ${isHealthy ? 'HEALTHY' : 'DISEASED'}
               <CardContent>
                 <div className="text-3xl font-bold text-primary">{healthyScans}</div>
                 <p className="text-sm text-muted-foreground">
-                  {Math.round((healthyScans / totalScans) * 100)}% of total scans
+                  {totalScans > 0 ? `${Math.round((healthyScans / totalScans) * 100)}% of total scans` : 'Start scanning'}
                 </p>
               </CardContent>
             </Card>
@@ -1098,8 +1065,8 @@ curl -X POST "https://your-domain.com/api/scan" \\
           </Card>
         </TabsContent>
 
-        {/* Teams Tab - Only for team admins who are not super admins */}
-        {isTeamAdmin && userData?.role !== 'super_admin' && (
+        {/* Teams Tab - For all team members */}
+        {isTeamMember && userData?.role !== 'super_admin' && userData?.role !== 'admin' && (
           <TabsContent value="teams" className="space-y-8">
             {teamsLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -1112,27 +1079,35 @@ curl -X POST "https://your-domain.com/api/scan" \\
                   <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <h3 className="text-lg font-semibold mb-2">No Teams Yet</h3>
                   <p className="text-muted-foreground">
-                    You are not an admin of any team. Contact your super admin to be assigned to a team.
+                    You are not a member of any team. Contact your team administrator to be added to a team.
                   </p>
                 </CardContent>
               </Card>
-            ) : userTeams.length === 1 ? (
-              // If user is admin of only one team, show the team dashboard directly
-              <TeamAdminDashboard 
-                teamId={userTeams[0].team_id} 
-                userRole={userTeams[0].role}
-              />
+            ) : selectedTeamId ? (
+              // Show selected team dashboard for regular members
+              <div className="space-y-4">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setSelectedTeamId(null)}
+                  className="flex items-center gap-2"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to Teams
+                </Button>
+                <UserTeamsDashboard teamId={selectedTeamId} />
+              </div>
             ) : (
-              // If user is admin of multiple teams, show team selection
+              // Show teams list for regular members
               <div className="space-y-6">
                 <Card className="glass">
                   <CardHeader>
                     <CardTitle className="text-2xl flex items-center gap-2">
                       <Building2 className="h-6 w-6" />
-                      Your Teams
+                      My Teams
                     </CardTitle>
                     <CardDescription>
-                      Select a team to manage members and API keys
+                      Access shared API tokens from your teams
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -1141,7 +1116,7 @@ curl -X POST "https://your-domain.com/api/scan" \\
                         <Card 
                           key={team.id} 
                           className="glass-subtle hover:shadow-lg transition-shadow cursor-pointer"
-                          onClick={() => setActiveTab(`team-${team.team_id}`)}
+                          onClick={() => setSelectedTeamId(team.team_id)}
                         >
                           <CardHeader>
                             <div className="flex items-start justify-between">
@@ -1151,43 +1126,30 @@ curl -X POST "https://your-domain.com/api/scan" \\
                                   Joined {new Date(team.joined_at).toLocaleDateString()}
                                 </CardDescription>
                               </div>
-                              <Badge variant={team.role === 'owner' ? 'destructive' : 'default'}>
-                                {team.role}
+                              <Badge variant={team.role === 'admin' ? 'destructive' : 'secondary'}>
+                                {team.role === 'admin' ? 'Team Admin' : 'Member'}
                               </Badge>
                             </div>
                           </CardHeader>
                           <CardContent>
-                            <Button className="w-full">
-                              <Settings className="h-4 w-4 mr-2" />
-                              Manage Team
-                            </Button>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">Your Role:</span>
+                                <span className="font-medium">
+                                  {team.role === 'admin' ? 'Team Admin' : 'Team Member'}
+                                </span>
+                              </div>
+                              <Button className="w-full" variant="outline">
+                                <Key className="h-4 w-4 mr-2" />
+                                View Shared Tokens
+                              </Button>
+                            </div>
                           </CardContent>
                         </Card>
                       ))}
                     </div>
                   </CardContent>
                 </Card>
-                
-                {/* Dynamic team tabs for each selected team */}
-                {userTeams.map((team) => (
-                  activeTab === `team-${team.team_id}` && (
-                    <div key={team.team_id}>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        className="mb-4"
-                        onClick={() => setActiveTab('teams')}
-                      >
-                        <ArrowLeft className="h-4 w-4 mr-2" />
-                        Back to Teams
-                      </Button>
-                      <TeamAdminDashboard 
-                        teamId={team.team_id} 
-                        userRole={team.role}
-                      />
-                    </div>
-                  )
-                ))}
               </div>
             )}
           </TabsContent>

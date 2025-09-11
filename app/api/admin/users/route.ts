@@ -10,11 +10,17 @@ async function handleGetUsers(req: NextRequest) {
     const search = url.searchParams.get('search') || ''
     const role = url.searchParams.get('role') || ''
 
+    const currentUser = getAdminUserFromRequest(req)
+    const isSuperAdmin = currentUser?.role === 'super_admin'
+
     const supabase = await createClient()
     
+    // If not super admin, only select limited fields
     let query = supabase
       .from('profiles')
-      .select('id, clerk_id, username, email, role, points, created_at, updated_at')
+      .select(isSuperAdmin 
+        ? 'id, clerk_id, username, email, role, points, created_at, updated_at'
+        : 'id, username, role, created_at')
       .order('created_at', { ascending: false })
 
     // Apply search filter
@@ -22,8 +28,8 @@ async function handleGetUsers(req: NextRequest) {
       query = query.or(`username.ilike.%${search}%,email.ilike.%${search}%`)
     }
 
-    // Apply role filter
-    if (role && ['user', 'admin', 'super_admin'].includes(role)) {
+    // Apply role filter (exclude regular users from filter)
+    if (role && ['admin', 'super_admin'].includes(role)) {
       query = query.eq('role', role)
     }
 
@@ -50,7 +56,7 @@ async function handleGetUsers(req: NextRequest) {
       countQuery = countQuery.or(`username.ilike.%${search}%,email.ilike.%${search}%`)
     }
 
-    if (role && ['user', 'admin', 'super_admin'].includes(role)) {
+    if (role && ['admin', 'super_admin'].includes(role)) {
       countQuery = countQuery.eq('role', role)
     }
 
@@ -60,8 +66,21 @@ async function handleGetUsers(req: NextRequest) {
       console.error('Error fetching users count:', countError)
     }
 
+    // Mask sensitive data for non-super admins
+    const sanitizedUsers = (users || []).map(user => {
+      if (!isSuperAdmin) {
+        return {
+          ...user,
+          email: undefined,
+          points: undefined,
+          clerk_id: undefined
+        }
+      }
+      return user
+    })
+
     return NextResponse.json({
-      users: users || [],
+      users: sanitizedUsers,
       pagination: {
         page,
         limit,
@@ -168,5 +187,122 @@ async function handleDeleteUser(req: NextRequest) {
   }
 }
 
+async function handleUpdateUser(req: NextRequest) {
+  try {
+    const { userId: targetUserId, role: newRole } = await req.json()
+    
+    if (!targetUserId || !newRole) {
+      return NextResponse.json(
+        { error: 'User ID and role are required' },
+        { status: 400 }
+      )
+    }
+
+    // Validate role
+    if (!['user', 'admin', 'super_admin'].includes(newRole)) {
+      return NextResponse.json(
+        { error: 'Invalid role. Must be user, admin, or super_admin' },
+        { status: 400 }
+      )
+    }
+
+    const currentUser = getAdminUserFromRequest(req)
+    
+    // Prevent self role change
+    if (currentUser?.id === targetUserId) {
+      return NextResponse.json(
+        { error: 'Cannot change your own role' },
+        { status: 400 }
+      )
+    }
+
+    const supabase = await createClient()
+
+    // Get the target user first to check their current role
+    const { data: targetUser, error: fetchError } = await supabase
+      .from('profiles')
+      .select('id, role, email, username')
+      .eq('id', targetUserId)
+      .single()
+
+    if (fetchError || !targetUser) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    // Role update permission checks
+    if (currentUser?.role === 'super_admin') {
+      // Super admin can only set roles to 'admin' or 'user', not 'super_admin'
+      if (newRole === 'super_admin') {
+        return NextResponse.json(
+          { error: 'Cannot promote users to super admin role' },
+          { status: 403 }
+        )
+      }
+      // Super admin can change any user's role to admin or user
+    } else if (currentUser?.role === 'admin') {
+      // Admin can only set role to 'user'
+      if (newRole !== 'user') {
+        return NextResponse.json(
+          { error: 'Admins can only set role to user' },
+          { status: 403 }
+        )
+      }
+      // Admin cannot change other admin's roles
+      if (targetUser.role === 'admin' || targetUser.role === 'super_admin') {
+        return NextResponse.json(
+          { error: 'You cannot change the role of admin or super admin users' },
+          { status: 403 }
+        )
+      }
+    } else {
+      // Regular users shouldn't have access to this endpoint at all
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      )
+    }
+
+    // Prevent changing super admin's role
+    if (targetUser.role === 'super_admin') {
+      return NextResponse.json(
+        { error: 'Super admin role cannot be changed' },
+        { status: 403 }
+      )
+    }
+
+    // Update the user's role
+    const { data: updatedUser, error: updateError } = await supabase
+      .from('profiles')
+      .update({ role: newRole, updated_at: new Date().toISOString() })
+      .eq('id', targetUserId)
+      .select('id, username, email, role')
+      .single()
+
+    if (updateError) {
+      console.error('Error updating user role:', updateError)
+      return NextResponse.json(
+        { error: 'Failed to update user role' },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({
+      message: `User ${updatedUser.username} role updated to ${newRole}`,
+      user: updatedUser
+    })
+
+  } catch (error) {
+    console.error('Update user error:', error)
+    return NextResponse.json(
+      { error: 'Failed to update user' },
+      { status: 500 }
+    )
+  }
+}
+
 export const GET = withAdminAuth(handleGetUsers)
 export const DELETE = withAdminAuth(handleDeleteUser)
+export const PUT = withAdminAuth(handleUpdateUser)
